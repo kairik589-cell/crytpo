@@ -8,10 +8,9 @@ import time
 @patch("api.routers.amm.pools_col")
 @patch("api.routers.amm.token_balances_col")
 @patch("api.routers.amm.utxo_col")
-@patch("api.routers.amm.miner_fee_pot_col")
 @patch("api.services.price_service.global_state_col")
 @patch("api.services.price_service.price_history_col")
-async def test_swap_optimistic_retry(mock_hist, mock_state, mock_pot, mock_utxo, mock_bal, mock_pools):
+async def test_swap_optimistic_retry(mock_hist, mock_state, mock_utxo, mock_bal, mock_pools):
     # Setup Pool
     pool_doc = {
         "_id": "pool1", "pair": "BTC-TKN", "token_symbol": "TKN",
@@ -23,16 +22,9 @@ async def test_swap_optimistic_retry(mock_hist, mock_state, mock_pot, mock_utxo,
     # Mock update_one to FAIL first time, SUCCESS second time
     fail_res = MagicMock()
     fail_res.modified_count = 0
-
     success_res = MagicMock()
     success_res.modified_count = 1
 
-    # Correct Way to side_effect an AsyncMock:
-    # If the function being mocked (update_one) is awaited, the side_effect must return values
-    # but the AsyncMock machinery handles wrapping them in coroutines if side_effect iterates.
-    # HOWEVER, MagicMock is not awaitable.
-
-    # Solution: Define simple async functions to serve as side effects
     async def first_call(*args, **kwargs):
         return fail_res
 
@@ -41,7 +33,6 @@ async def test_swap_optimistic_retry(mock_hist, mock_state, mock_pot, mock_utxo,
 
     mock_pools.update_one.side_effect = [first_call(), second_call()]
 
-    mock_pot.update_one = AsyncMock()
     mock_utxo.insert_one = AsyncMock()
     mock_bal.update_one = AsyncMock()
     mock_state.find_one = AsyncMock(return_value={"price_usd": 1.0})

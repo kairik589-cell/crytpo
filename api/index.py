@@ -1,13 +1,12 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from api.routers import tokens, amm, staking, extras, prices
-from api.services import wallet_service, blockchain_service, price_service
+from api.services import wallet_service, blockchain_service, price_service, economy_service
 from api.core.blockchain_models import Block, Transaction, create_genesis_block
-from api.core.database import miner_fee_pot_col
 from api.core.utils import serialize_mongo
 import time
 
-app = FastAPI(title="Bitcoin Clone + DeFi (AMM & Staking)", version="2.0.0")
+app = FastAPI(title="Bitcoin Clone + DeFi (AMM & Staking)", version="2.1.0")
 
 # Register Routers
 app.include_router(tokens.router, prefix="/token", tags=["Token Layer"])
@@ -22,6 +21,8 @@ async def startup_event():
     await blockchain_service.init_chain()
     # Ensure initial price exists
     await price_service.init_price()
+    # Initialize Economy (USDT + Price Anchor)
+    await economy_service.init_economy()
 
 @app.get("/")
 def read_root():
@@ -52,23 +53,14 @@ async def mine_block(miner_address: str = "miner1"):
     if not last_block:
         return {"error": "Chain not initialized"}
 
-    # 1. Calculate Reward (Block Reward + Fees)
+    # 1. Calculate Reward (Block Reward Only)
     block_reward = 50.0
-
-    # Check accumulated fees
-    pot = await miner_fee_pot_col.find_one({"_id": "global_pot"})
-    fee_reward = 0.0
-    if pot:
-        fee_reward = pot.get("amount", 0.0)
-        # Reset pot
-        await miner_fee_pot_col.update_one({"_id": "global_pot"}, {"$set": {"amount": 0.0}})
-
-    total_reward = block_reward + fee_reward
+    # Fees now go to ADMIN wallet directly during swap, not here.
 
     # Create CoinBase Transaction
     coinbase_tx = Transaction(
         inputs=[],
-        outputs=[{"amount": total_reward, "address": miner_address}],
+        outputs=[{"amount": block_reward, "address": miner_address}],
         timestamp=time.time()
     )
     coinbase_tx.txid = coinbase_tx.calculate_hash()
@@ -93,8 +85,8 @@ async def mine_block(miner_address: str = "miner1"):
         "block": new_block.dict(),
         "reward_breakdown": {
             "base": block_reward,
-            "fees": fee_reward,
-            "total": total_reward
+            "fees": 0.0, # Fees go to Admin
+            "total": block_reward
         }
     })
 

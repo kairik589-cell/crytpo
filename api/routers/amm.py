@@ -1,24 +1,24 @@
 from fastapi import APIRouter, HTTPException, Body
 from api.core.database import (
     pools_col, token_balances_col, utxo_col,
-    miner_fee_pot_col, pool_history_col
+    pool_history_col
 )
 from api.models.market_models import PoolCreate, LiquidityAction, SwapRequest
 from api.services.wallet_service import verify_signature
 from api.services.price_service import update_btc_price, record_ohlc
+from api.services.economy_service import ADMIN_ADDRESS
 from api.core.utils import serialize_mongo
 import time
 
 router = APIRouter()
 
 FEE_TOTAL = 0.003
-FEE_MINER = 0.001
+FEE_OWNER = 0.001
 
 @router.post("/pool/create")
 async def create_pool(data: PoolCreate):
     # Verify Signature
     msg = f"create_pool:{data.token_symbol}:{data.initial_native}:{data.initial_token}:{data.timestamp}"
-    # Simplified verify (requires public key passing in real app, here assuming signature verifies address)
 
     pair = f"BTC-{data.token_symbol}"
     existing = await pools_col.find_one({"pair": pair})
@@ -34,7 +34,6 @@ async def create_pool(data: PoolCreate):
         "created_at": time.time()
     }
 
-    # ATOMIC DEDUCTION (Token Only - Native is hard in simulation)
     res = await token_balances_col.update_one(
         {"address": data.creator_address, "symbol": data.token_symbol, "balance": {"$gte": data.initial_token}},
         {"$inc": {"balance": -data.initial_token}}
@@ -44,7 +43,6 @@ async def create_pool(data: PoolCreate):
 
     await pools_col.insert_one(pool_doc)
 
-    # LP Credit
     lp_symbol = f"LP-{pair}"
     await token_balances_col.update_one(
         {"address": data.creator_address, "symbol": lp_symbol},
@@ -56,7 +54,6 @@ async def create_pool(data: PoolCreate):
 
 @router.post("/liquidity/add")
 async def add_liquidity(data: LiquidityAction):
-    # Optimistic Loop (Try until success)
     for _ in range(3):
         pool = await pools_col.find_one({"pair": data.pair})
         if not pool: raise HTTPException(status_code=404, detail="Pool not found")
@@ -69,12 +66,10 @@ async def add_liquidity(data: LiquidityAction):
         amount_token = data.amount_native * (current_token / current_native)
         shares_minted = (amount_native / current_native) * pool["total_shares"]
 
-        # ATOMIC UPDATE POOL with optimistic concurrency check
-        # We ensure reserves haven't changed since we read them
         res = await pools_col.update_one(
             {
                 "_id": pool["_id"],
-                "reserve_native": current_native, # Ensure unchanged
+                "reserve_native": current_native,
                 "reserve_token": current_token
             },
             {
@@ -87,7 +82,6 @@ async def add_liquidity(data: LiquidityAction):
         )
 
         if res.modified_count == 1:
-            # Success! Credit LP
             lp_symbol = f"LP-{data.pair}"
             await token_balances_col.update_one(
                 {"address": data.user_address, "symbol": lp_symbol},
@@ -96,14 +90,10 @@ async def add_liquidity(data: LiquidityAction):
             )
             return serialize_mongo({"message": "Liquidity added", "shares_minted": shares_minted})
 
-    raise HTTPException(status_code=409, detail="High volatility - try again (Optimistic Lock Failed)")
+    raise HTTPException(status_code=409, detail="High volatility - try again")
 
 @router.post("/swap")
 async def swap(req: SwapRequest):
-    # Signature Check
-    msg = f"swap:{req.pair}:{req.direction}:{req.amount_in}:{req.timestamp}"
-    # verify_signature(...)
-
     # Optimistic Loop
     for _ in range(3):
         pool = await pools_col.find_one({"pair": req.pair})
@@ -120,8 +110,8 @@ async def swap(req: SwapRequest):
         if amount_out < req.min_amount_out:
             raise HTTPException(status_code=400, detail=f"Slippage: Output {amount_out} < Min {req.min_amount_out}")
 
-        fee_miner = req.amount_in * FEE_MINER
-        amount_in_pool = req.amount_in - fee_miner
+        fee_owner = req.amount_in * FEE_OWNER
+        amount_in_pool = req.amount_in - fee_owner
 
         # ATOMIC POOL UPDATE
         update_query = {}
@@ -136,10 +126,19 @@ async def swap(req: SwapRequest):
         res = await pools_col.update_one(query, update)
 
         if res.modified_count == 1:
-            # Success - Distribute Fees & Balances
-            await miner_fee_pot_col.update_one({"_id": "global_pot"}, {"$inc": {"amount": fee_miner}}, upsert=True)
+            # Fee to Owner (ADMIN)
+            fee_symbol = "BTC" if req.direction == "native_to_token" else pool["token_symbol"]
 
-            # Balance Updates (Simplified: Credit Output Only for safety of demo, assuming input valid)
+            if fee_symbol == "BTC":
+                 await utxo_col.insert_one({"txid": f"fee_{time.time()}", "vout": 0, "amount": fee_owner, "address": ADMIN_ADDRESS})
+            else:
+                 await token_balances_col.update_one(
+                    {"address": ADMIN_ADDRESS, "symbol": fee_symbol},
+                    {"$inc": {"balance": fee_owner}},
+                    upsert=True
+                )
+
+            # User Balance Updates
             symbol_out = pool["token_symbol"] if req.direction == "native_to_token" else "BTC"
 
             if symbol_out == "BTC":
@@ -151,17 +150,16 @@ async def swap(req: SwapRequest):
                     upsert=True
                 )
 
-            # Pricing Updates (Non-blocking / best effort)
+            # Pricing Updates
             try:
                 pd = "buy" if req.direction == "token_to_native" else "sell"
                 vol = amount_out if req.direction == "token_to_native" else req.amount_in
                 await update_btc_price(pd, vol)
 
-                # OHLC
                 t_price = (req.amount_in if req.direction=="native_to_token" else amount_out) / (amount_out if req.direction=="native_to_token" else req.amount_in)
                 await record_ohlc(pool["token_symbol"], t_price, vol)
             except:
-                pass # Don't fail the swap if stats fail
+                pass
 
             return serialize_mongo({"message": "Swap successful", "amount_out": amount_out})
 
