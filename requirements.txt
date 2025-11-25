@@ -1,4 +1,11 @@
 fastapi
 uvicorn
-httpx
 motor
+pydantic
+ecdsa
+python-multipart
+passlib
+bcrypt
+pyjwt
+pytest
+httpx

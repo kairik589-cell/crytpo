@@ -1,50 +1,87 @@
-from fastapi import FastAPI, Body, HTTPException
-from fastapi.encoders import jsonable_encoder
-from typing import Dict, Any, List
-from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, Field
-from bson import ObjectId
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from api.routers import tokens, market
+from api.services import wallet_service, blockchain_service
+from api.core.blockchain_models import Block, Transaction, create_genesis_block
 
-app = FastAPI()
+app = FastAPI(title="Bitcoin Clone + Token Layer", version="1.0.0")
 
-# MongoDB Configuration
-MONGODB_URI = "mongodb+srv://Vercel-Admin-data:Bhkxu4nxHIvG2kPJ@data.ecs0ces.mongodb.net/?retryWrites=true&w=majority"
-client = AsyncIOMotorClient(MONGODB_URI)
-db = client.get_database("vercel_test_db")
-collection = db.get_collection("entries")
+# Register Routers
+app.include_router(tokens.router, prefix="/token", tags=["Token Layer"])
+app.include_router(market.router, prefix="/market", tags=["Marketplace"])
 
-# Helper to convert ObjectId to string
-def pydantic_encoder(obj):
-    if isinstance(obj, ObjectId):
-        return str(obj)
-    return obj
+@app.on_event("startup")
+async def startup_event():
+    # Ensure genesis block exists
+    await blockchain_service.init_chain()
 
 @app.get("/")
-async def read_root():
-    try:
-        entries = []
-        cursor = collection.find().limit(10)
-        async for document in cursor:
-            # Convert ObjectId to string for JSON serialization
-            document["_id"] = str(document["_id"])
-            entries.append(document)
-        return {"message": "Success", "data": entries}
-    except Exception as e:
-        return {"message": "Error fetching data", "error": str(e)}
+def read_root():
+    return {"message": "Bitcoin Clone API is running. Use /docs for documentation."}
 
-@app.post("/")
-async def create_entry(payload: Dict[Any, Any] = Body(...)):
-    try:
-        # Insert into MongoDB
-        result = await collection.insert_one(payload)
-        new_entry = await collection.find_one({"_id": result.inserted_id})
+# Wallet Endpoints
+@app.post("/wallet/new")
+def create_wallet():
+    wallet = wallet_service.generate_wallet()
+    return wallet.dict()
 
-        # Convert ObjectId to string
-        new_entry["_id"] = str(new_entry["_id"])
+@app.get("/wallet/{address}")
+async def get_wallet_balance(address: str):
+    balance = await blockchain_service.get_balance(address)
+    utxos = await blockchain_service.get_utxos(address)
+    for u in utxos: u["_id"] = str(u["_id"])
+    return {"address": address, "balance": balance, "utxos": utxos}
 
-        return {
-            "message": "Data saved successfully",
-            "data": new_entry
-        }
-    except Exception as e:
-        return {"message": "Error saving data", "error": str(e)}
+# Blockchain Endpoints
+@app.get("/chain/state")
+async def get_chain_state():
+    last_block = await blockchain_service.get_last_block()
+    return {"height": last_block.index if last_block else 0, "last_hash": last_block.hash if last_block else ""}
+
+@app.post("/mine")
+async def mine_block(miner_address: str = "miner1"):
+    last_block = await blockchain_service.get_last_block()
+    if not last_block:
+        return {"error": "Chain not initialized"}
+
+    # Create CoinBase Transaction
+    coinbase_tx = Transaction(
+        inputs=[],
+        outputs=[{"amount": 50.0, "address": miner_address}],
+        timestamp=0 # Simplified
+    )
+    coinbase_tx.txid = coinbase_tx.calculate_hash()
+
+    # Create Block
+    new_block = Block(
+        index=last_block.index + 1,
+        timestamp=0, # Use current time in model
+        transactions=[coinbase_tx],
+        previous_hash=last_block.hash,
+        difficulty=last_block.difficulty
+    )
+
+    # Mine (PoW)
+    new_block.mine_block()
+
+    # Add to chain
+    await blockchain_service.add_block(new_block)
+
+    return {"message": "Block mined", "block": new_block.dict()}
+
+@app.get("/block/{hash}")
+async def get_block(hash: str):
+    # This is a placeholder. In real implementation we'd query by hash
+    # For now let's just return the last block if it matches, to save time on query impl
+    last = await blockchain_service.get_last_block()
+    if last and last.hash == hash:
+        return last.dict()
+    return {"error": "Block not found (simulator limited)"}
+
+# Global Exception Handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"message": str(exc)},
+    )
