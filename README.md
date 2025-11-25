@@ -24,137 +24,278 @@ This system mimics a real crypto economy.
 
 ---
 
-## 📖 API Reference
+## 📖 Full API Reference
 
-All endpoints accept/return JSON.
+This section mirrors the Swagger UI documentation found at `/docs`.
 
-### 🔐 Wallet
+### 🔐 Wallet & Auth
 
 #### `POST /wallet/new`
-Create a new anonymous wallet.
-**Response:**
-```json
-{
-  "private_key": "hex...",
-  "public_key": "hex...",
-  "address": "hash..."
-}
-```
+Create a new anonymous wallet with ECDSA key pair.
+
+*   **Request Body**: (Empty) `{}`
+*   **Response**:
+    ```json
+    {
+      "private_key": "string (hex)",
+      "public_key": "string (hex)",
+      "address": "string (hash)"
+    }
+    ```
 
 #### `GET /wallet/{address}`
-Get balance (Native Coins & Tokens).
+Get wallet details including Native Balance (Coins) and Unspent Transaction Outputs (UTXOs).
+
+*   **Response**:
+    ```json
+    {
+      "address": "string",
+      "balance": 50.0,
+      "utxos": [
+        { "txid": "...", "vout": 0, "amount": 50.0, "address": "..." }
+      ]
+    }
+    ```
+
+#### `GET /wallet/{address}/history`
+Get transaction history for a specific address (Token transfers).
+
+*   **Response**:
+    ```json
+    {
+      "history": [
+        { "sender_address": "...", "receiver_address": "...", "amount": 10, "symbol": "TKN", "timestamp": 1709... }
+      ]
+    }
+    ```
 
 ---
 
-### 🪙 Tokens
+### 🪙 Token Layer
 
 #### `POST /token/create`
 Mint a new custom token.
-**Request:**
-```json
-{
-  "name": "My Coin",
-  "symbol": "MCN",
-  "total_supply": 1000000,
-  "owner_address": "your_address"
-}
-```
+
+*   **Request Body**:
+    ```json
+    {
+      "name": "My Token",
+      "symbol": "MTK",
+      "total_supply": 1000000.0,
+      "owner_address": "string"
+    }
+    ```
+*   **Response**:
+    ```json
+    {
+      "message": "Token created successfully",
+      "token": { ... }
+    }
+    ```
 
 #### `POST /token/transfer`
-Send tokens to another user.
-**Request:**
-```json
-{
-  "sender_address": "...",
-  "sender_public_key": "...",
-  "receiver_address": "...",
-  "symbol": "MCN",
-  "amount": 100,
-  "timestamp": 1709880000,
-  "signature": "hex..."
-}
-```
+Transfer tokens between users. Requires signature.
+
+*   **Request Body**:
+    ```json
+    {
+      "sender_address": "string",
+      "sender_public_key": "string",
+      "receiver_address": "string",
+      "symbol": "MTK",
+      "amount": 100.0,
+      "timestamp": 1709881234.0,
+      "signature": "string (hex signature of: sender:receiver:symbol:amount:timestamp)"
+    }
+    ```
+
+#### `POST /token/burn`
+Burn tokens to reduce total supply.
+
+*   **Request Body**:
+    ```json
+    {
+      "symbol": "MTK",
+      "amount": 50.0,
+      "address": "string"
+    }
+    ```
+
+#### `GET /token/list`
+List all available tokens in the system.
+
+#### `GET /token/{symbol}`
+Get metadata for a specific token.
+
+#### `GET /token/{symbol}/holders`
+Get a list of all holders for a token.
+
+#### `GET /token/{symbol}/richlist`
+Get the top 10 holders by balance.
 
 ---
 
 ### 🏦 Marketplace (AMM)
 
 #### `POST /market/pool/create`
-Create a trading pair (e.g., BTC-MCN).
-**Request:**
-```json
-{
-  "token_symbol": "MCN",
-  "initial_native": 1.0,   // 1 BTC
-  "initial_token": 100.0,  // 100 MCN (Implies 1 BTC = 100 MCN)
-  "creator_address": "...",
-  "timestamp": 1709880000,
-  "signature": "..."
-}
-```
+Initialize a new Liquidity Pool (e.g., BTC-MTK). Requires providing initial liquidity for both sides.
+
+*   **Request Body**:
+    ```json
+    {
+      "token_symbol": "MTK",
+      "initial_native": 1.0,   // Amount of BTC
+      "initial_token": 100.0,  // Amount of MTK
+      "creator_address": "string",
+      "timestamp": 1709881234.0,
+      "signature": "string"
+    }
+    ```
 
 #### `POST /market/liquidity/add`
-Add funds to an existing pool to earn LP tokens.
-**Request:**
-```json
-{
-  "pair": "BTC-MCN",
-  "user_address": "...",
-  "amount_native": 0.5,
-  "timestamp": 1709880000,
-  "signature": "..."
-}
-```
+Add liquidity to an existing pool. Returns LP Tokens.
+
+*   **Request Body**:
+    ```json
+    {
+      "pair": "BTC-MTK",
+      "user_address": "string",
+      "amount_native": 0.5,
+      "amount_token": 0.0, // Optional, usually calculated automatically
+      "timestamp": 1709881234.0,
+      "signature": "string"
+    }
+    ```
 
 #### `POST /market/swap`
-Swap tokens immediately.
-**Request:**
-```json
-{
-  "user_address": "...",
-  "pair": "BTC-MCN",
-  "direction": "native_to_token", // or "token_to_native"
-  "amount_in": 0.1,
-  "min_amount_out": 9.0, // Slippage protection
-  "timestamp": 1709880000,
-  "signature": "..."
-}
-```
+Swap tokens using the Constant Product Formula ($x \cdot y = k$).
+
+*   **Request Body**:
+    ```json
+    {
+      "user_address": "string",
+      "pair": "BTC-MTK",
+      "direction": "native_to_token", // OR "token_to_native"
+      "amount_in": 0.1,
+      "min_amount_out": 9.5, // Slippage protection
+      "timestamp": 1709881234.0,
+      "signature": "string"
+    }
+    ```
+
+#### `GET /market/pools`
+List all active liquidity pools.
+
+#### `GET /market/stats`
+Get global market statistics (e.g., 24h Volume).
 
 ---
 
-### ⛏️ Blockchain
+### 💰 Staking
 
-#### `POST /mine`
-Mine a new block to confirm transactions and earn Block Reward (50 BTC).
-**Query Param:** `?miner_address=...`
+#### `POST /staking/deposit`
+Lock assets to earn APY rewards.
 
-#### `GET /chain/state`
-Get current block height.
+*   **Request Body**:
+    ```json
+    {
+      "user_address": "string",
+      "symbol": "MTK", // or "BTC"
+      "amount": 500.0,
+      "duration_days": 30,
+      "timestamp": 1709881234.0,
+      "signature": "string"
+    }
+    ```
+
+#### `POST /staking/withdraw`
+Unstake assets and claim rewards.
+
+*   **Request Body**:
+    ```json
+    {
+      "stake_id": "string (ObjectId)",
+      "signature": "string"
+    }
+    ```
 
 ---
 
 ### 📈 Pricing & Charts
 
 #### `GET /price/ticker`
-Get current prices of all tokens in USD.
+Get the current live price of BTC (in USD) and all Tokens (in BTC and USD).
+
+*   **Response**:
+    ```json
+    {
+      "BTC": { "price_usd": 50123.45 },
+      "tokens": {
+        "MTK": { "price_btc": 0.01, "price_usd": 501.23 }
+      }
+    }
+    ```
 
 #### `GET /price/chart/{symbol}`
-Get historical OHLC data (Candlestick chart).
+Get historical OHLC (Open-High-Low-Close) data for charts (1-minute candles).
 
 ---
 
-## 🛠 Setup
+### ⛏️ Blockchain Core
 
-1.  **Clone & Install**:
+#### `POST /mine`
+Simulate Proof-of-Work mining to create a new block and earn rewards.
+
+*   **Query Parameter**: `?miner_address=YOUR_WALLET_ADDRESS`
+*   **Response**:
+    ```json
+    {
+      "message": "Block mined",
+      "block": { "index": 5, "hash": "000...", "transactions": [...] },
+      "reward_breakdown": { "base": 50.0, "fees": 0.0, "total": 50.0 }
+    }
+    ```
+
+#### `GET /chain/state`
+Get the current block height and last block hash.
+
+#### `GET /block/{hash}`
+Get details of a specific block.
+
+---
+
+### 🛠 Extras
+
+#### `POST /faucet`
+Get free test coins for development.
+
+*   **Request Body**: `{"address": "string"}`
+
+#### `GET /network/stats`
+Get total block count.
+
+#### `GET /system/health`
+Check API status.
+
+---
+
+## 📦 Setup & Deployment
+
+1.  **Clone Repository**
+    ```bash
+    git clone <repo_url>
+    ```
+2.  **Install Dependencies**
     ```bash
     pip install -r requirements.txt
     ```
-2.  **Run Locally**:
+3.  **Set Environment Variables**
+    *   `MONGODB_URI`: Your MongoDB Atlas Connection String.
+4.  **Run Locally**
     ```bash
     uvicorn api.index:app --reload
     ```
-3.  **Deploy to Vercel**:
+5.  **Deploy to Vercel**
     ```bash
     vercel
     ```
