@@ -20,13 +20,13 @@ token_transfers_col = db.token_transfers
 pools_col = db.pools
 pool_history_col = db.pool_history
 
+# Pricing & Global State
+global_state_col = db.global_state # Stores BTC price, network stats
+price_history_col = db.price_history # OHLC data
+
 # Staking
 stakes_col = db.stakes
 
 # Stats & Mining
 mining_stats_col = db.mining_stats
 miner_fee_pot_col = db.miner_fee_pot # Stores accumulated fees waiting to be mined
-
-# Deprecated/Legacy (kept if needed)
-orders_col = db.orders
-trades_col = db.trades

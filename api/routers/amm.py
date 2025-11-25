@@ -5,6 +5,7 @@ from api.core.database import (
 )
 from api.models.market_models import PoolCreate, LiquidityAction, SwapRequest
 from api.services.wallet_service import verify_signature
+from api.services.price_service import update_btc_price, record_ohlc
 from api.core.utils import serialize_mongo
 import time
 
@@ -194,12 +195,37 @@ async def swap(req: SwapRequest):
             "address": req.user_address
         })
 
-    # Record Stats
+    # --- PRICING LOGIC UPDATES ---
+
+    # 1. Update Global BTC Price
+    # Logic: Buying BTC (Token -> Native) pushes BTC price UP
+    #        Selling BTC (Native -> Token) pushes BTC price DOWN
+    price_direction = "buy" if req.direction == "token_to_native" else "sell"
+    volume_native = amount_out if req.direction == "token_to_native" else req.amount_in
+
+    await update_btc_price(price_direction, volume_native)
+
+    # 2. Record Token OHLC
+    # Token Price in Native = Native Reserve / Token Reserve (Post-swap approx or Transaction Price)
+    # Tx Price = Native Amount / Token Amount
+
+    native_amt = req.amount_in if req.direction == "native_to_token" else amount_out
+    token_amt = amount_out if req.direction == "native_to_token" else req.amount_in
+
+    token_price_native = native_amt / token_amt
+
+    # We record OHLC for the Token using the Token Symbol as key
+    # Volume is Token Volume
+    await record_ohlc(pool["token_symbol"], token_price_native, token_amt)
+
+    # --- END PRICING LOGIC ---
+
+    # Record legacy stats if needed (pool_history)
     await pool_history_col.insert_one({
         "pair": req.pair,
-        "price": amount_out / req.amount_in, # simplified price
+        "price": token_price_native,
         "timestamp": time.time(),
-        "volume": req.amount_in
+        "volume": token_amt
     })
 
     return serialize_mongo({"message": "Swap successful", "amount_out": amount_out})

@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from api.routers import tokens, amm, staking, extras
-from api.services import wallet_service, blockchain_service
+from api.routers import tokens, amm, staking, extras, prices
+from api.services import wallet_service, blockchain_service, price_service
 from api.core.blockchain_models import Block, Transaction, create_genesis_block
 from api.core.database import miner_fee_pot_col
 from api.core.utils import serialize_mongo
@@ -13,12 +13,15 @@ app = FastAPI(title="Bitcoin Clone + DeFi (AMM & Staking)", version="2.0.0")
 app.include_router(tokens.router, prefix="/token", tags=["Token Layer"])
 app.include_router(amm.router, prefix="/market", tags=["Marketplace (AMM)"])
 app.include_router(staking.router, prefix="/staking", tags=["Staking"])
+app.include_router(prices.router, prefix="/price", tags=["Pricing & Charts"])
 app.include_router(extras.router, tags=["Extras"])
 
 @app.on_event("startup")
 async def startup_event():
     # Ensure genesis block exists
     await blockchain_service.init_chain()
+    # Ensure initial price exists
+    await price_service.init_price()
 
 @app.get("/")
 def read_root():
