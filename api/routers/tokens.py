@@ -3,6 +3,7 @@ from api.core.database import tokens_col, token_balances_col, token_transfers_co
 from api.models.token_models import TokenCreate, TokenTransfer
 from api.services.wallet_service import verify_signature
 from api.services.blockchain_service import get_utxos
+from api.core.utils import serialize_mongo
 import time
 
 router = APIRouter()
@@ -26,7 +27,7 @@ async def create_token(token: TokenCreate):
         "balance": token.total_supply
     })
 
-    return {"message": "Token created successfully", "token": token_doc}
+    return serialize_mongo({"message": "Token created successfully", "token": token_doc})
 
 @router.post("/transfer")
 async def transfer_token(transfer: TokenTransfer):
@@ -68,22 +69,17 @@ async def transfer_token(transfer: TokenTransfer):
 async def list_tokens():
     cursor = tokens_col.find()
     tokens = await cursor.to_list(length=100)
-    for t in tokens:
-        t["_id"] = str(t["_id"])
-    return tokens
+    return serialize_mongo(tokens)
 
 @router.get("/{symbol}")
 async def get_token(symbol: str):
     token = await tokens_col.find_one({"symbol": symbol})
     if not token:
         raise HTTPException(status_code=404, detail="Token not found")
-    token["_id"] = str(token["_id"])
-    return token
+    return serialize_mongo(token)
 
 @router.get("/{symbol}/holders")
 async def get_holders(symbol: str):
     cursor = token_balances_col.find({"symbol": symbol})
     holders = await cursor.to_list(length=100)
-    for h in holders:
-        h["_id"] = str(h["_id"])
-    return holders
+    return serialize_mongo(holders)

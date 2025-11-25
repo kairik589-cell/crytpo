@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Body
 from api.core.database import orders_col, trades_col, token_balances_col
+from api.core.utils import serialize_mongo
 from pydantic import BaseModel
 import time
 
@@ -31,12 +32,12 @@ async def place_order(order: Order):
     order_doc["status"] = "open"
 
     result = await orders_col.insert_one(order_doc)
-    order_doc["_id"] = str(result.inserted_id)
+    # Ensure _id is handled, though serialize_mongo handles it too
 
     # 4. Trigger Matching Engine (Simple Immediate Match)
     await match_orders(order.pair)
 
-    return {"message": "Order placed", "order": order_doc}
+    return serialize_mongo({"message": "Order placed", "order": order_doc})
 
 async def match_orders(pair: str):
     # Simple matching logic: Find overlapping buy/sell
@@ -93,7 +94,4 @@ async def get_orderbook(pair: str):
     buys = await orders_col.find({"pair": pair, "order_type": "buy", "status": "open"}).sort("price", -1).to_list(length=50)
     sells = await orders_col.find({"pair": pair, "order_type": "sell", "status": "open"}).sort("price", 1).to_list(length=50)
 
-    for o in buys: o["_id"] = str(o["_id"])
-    for o in sells: o["_id"] = str(o["_id"])
-
-    return {"bids": buys, "asks": sells}
+    return serialize_mongo({"bids": buys, "asks": sells})
