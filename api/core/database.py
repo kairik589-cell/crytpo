@@ -15,5 +15,18 @@ mempool_col = db.mempool
 tokens_col = db.tokens
 token_balances_col = db.token_balances
 token_transfers_col = db.token_transfers
+
+# Market (AMM)
+pools_col = db.pools
+pool_history_col = db.pool_history
+
+# Staking
+stakes_col = db.stakes
+
+# Stats & Mining
+mining_stats_col = db.mining_stats
+miner_fee_pot_col = db.miner_fee_pot # Stores accumulated fees waiting to be mined
+
+# Deprecated/Legacy (kept if needed)
 orders_col = db.orders
 trades_col = db.trades
